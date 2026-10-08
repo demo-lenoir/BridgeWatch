@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 *.log
+__pycache__/
+*.py[cod]
 coverage.out
 bin/
 out/
