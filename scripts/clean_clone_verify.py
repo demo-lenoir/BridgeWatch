@@ -19,8 +19,9 @@ def run(args, cwd, env=None):
 
 
 def main():
-    if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip():
-        raise RuntimeError("clean-clone verification requires a committed source tree")
+    status = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT, text=True).strip()
+    if status:
+        raise RuntimeError(f"clean-clone verification requires a committed source tree:\n{status}")
     with tempfile.TemporaryDirectory(prefix="bridgewatch-clean-clone-") as directory:
         base = pathlib.Path(directory)
         archive = base / "source.tar"
