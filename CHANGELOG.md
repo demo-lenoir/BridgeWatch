@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Established Phase 0 architecture, schema, API contract, and validation foundation.
+- Established the architecture, schema, API contract, and validation foundation.
 - Added MockBridge v1 claim decoding, durable observation ingestion, conflict classification, transactional projection, and PostgreSQL concurrency tests.
 - Added bounded source HTTP catch-up, durable stream configuration/checkpoints, canonical ancestry, shallow reorg reconciliation, revocable source finality, source metrics, and a pinned Anvil integration harness.
 - Added an independent destination HTTP watcher, checkpoint, canonical ancestry, and confirmation policy. Matching execution can reach `DEST_SEEN` and `COMPLETED`; supported reorgs on either chain recompute and may withdraw completion.

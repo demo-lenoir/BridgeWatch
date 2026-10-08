@@ -57,7 +57,7 @@ The [manual recovery command](recovery.md) validates an operator-selected truste
 
 ## Projection and finality
 
-The Phase 1 projector still determines claim correlation. The shared canonical projector loads only claims joined through currently canonical blocks on their respective chains. It applies source and destination confirmation policies independently. It emits `SOURCE_FINAL` only for a canonical source claim satisfying source policy; `DEST_SEEN` additionally requires a matching successful canonical destination execution; `COMPLETED` requires destination policy as well and no blocking conflict or duplicate-execution anomaly.
+The shared canonical projector determines claim correlation from currently canonical blocks on both chains. It applies source and destination confirmation policies independently. It emits `SOURCE_FINAL` only for a canonical source claim satisfying source policy; `DEST_SEEN` additionally requires a matching successful canonical destination execution; `COMPLETED` requires destination policy as well and no blocking conflict or duplicate-execution anomaly.
 
 Each chain uses `head - evidence block + 1`. A transition stores both applicable observations, head hashes/numbers, observed and required confirmations, and policy versions. Reorg recomputation uses the same evidence query and projection path. It does not apply inverse state rules. A source reorg can turn `COMPLETED` into `UNMATCHED_DESTINATION`; a destination reorg can turn it into `SOURCE_FINAL`.
 

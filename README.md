@@ -2,7 +2,7 @@
 
 BridgeWatch checks whether a message sent through a bridge was actually executed on the destination chain.
 
-A source transaction can succeed while delivery is delayed, duplicated, or never completed. Both chains can also reorganize, and an RPC provider can miss data or fail midway through a scan. BridgeWatch follows each chain independently, matches source messages to destination executions, and keeps a durable account of what it has seen. This repository demonstrates the monitoring and recovery work behind a useful bridge status, using a deterministic MockBridge rather than a live custody bridge.
+A transfer can look successful where it started and still never arrive on the other chain. Missing delivery may be a normal delay, a changed chain history, or an RPC blind spot. BridgeWatch watches both chains independently, matches source messages to destination executions, and keeps a durable account of the evidence. It demonstrates how to distinguish completed delivery, overdue messages, and states that are unsafe to classify, using a deterministic MockBridge rather than a live custody bridge.
 
 ## How it works
 
@@ -39,7 +39,7 @@ The [failure matrix](docs/failure-matrix.md) and [architecture](docs/architectur
 Prerequisites for the local demonstration: Go 1.27.1, Python 3, PostgreSQL 18 server tools, Docker, and Foundry (`anvil`, `forge`, `cast`). The demo starts disposable local chains and PostgreSQL; no public RPC credentials are needed.
 
 ```sh
-git clone <repository-url> BridgeWatch
+git clone https://github.com/demo-lenoir/BridgeWatch.git BridgeWatch
 cd BridgeWatch
 go mod download
 make demo
