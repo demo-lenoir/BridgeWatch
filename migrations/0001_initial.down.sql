@@ -1,0 +1,11 @@
+BEGIN;
+DROP TABLE message_alerts;
+DROP TABLE message_transitions;
+DROP TABLE message_anomalies;
+DROP TABLE observation_conflicts;
+DROP TABLE message_claims;
+DROP TABLE message_observations;
+DROP TABLE cross_chain_messages;
+DROP TABLE chain_checkpoints;
+DROP TABLE chain_blocks;
+COMMIT;

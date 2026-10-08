@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: BridgeWatch API
+  version: 0.1.0
+  description: Read-only operational API backed by durable PostgreSQL evidence. STUCK is a recoverable relay-delay classification, not proof of bridge failure.
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/messages/{id}:
+    get:
+      summary: Get one normalized message
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Stable server-derived encoding of protocol, chain pair, and message ID.
+          schema: {type: string, maxLength: 256}
+      responses:
+        '200':
+          description: Message with evidence and operational classifications
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /v1/messages:
+    get:
+      summary: List messages
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {name: protocol, in: query, schema: {type: string, maxLength: 64}}
+        - {name: source_chain_id, in: query, schema: {type: string, pattern: '^[0-9]+$'}}
+        - {name: destination_chain_id, in: query, schema: {type: string, pattern: '^[0-9]+$'}}
+        - name: state
+          in: query
+          schema: {$ref: '#/components/schemas/State'}
+        - {name: stuck, in: query, schema: {type: boolean}}
+        - {name: anomaly, in: query, schema: {type: string, enum: [STUCK, FAILED, REORGED, DUPLICATE_EXECUTION, CONFLICT, MANUAL_INTERVENTION]}}
+      responses:
+        '200':
+          description: Bounded cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Message'}}
+                  next_cursor: {type: string, maxLength: 512}
+  /v1/status:
+    get:
+      summary: Chain and service health
+      responses:
+        '200':
+          description: Independent chain status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chains]
+                properties:
+                  chains: {type: array, maxItems: 2, items: {$ref: '#/components/schemas/ChainStatus'}}
+                  ready: {type: boolean}
+                  open_anomalies: {type: integer, format: int64}
+                  alert_outbox_pending: {type: integer, format: int64}
+  /v1/anomalies:
+    get:
+      summary: List anomaly episodes
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {name: kind, in: query, schema: {type: string, enum: [STUCK, FAILED, REORGED, DUPLICATE_EXECUTION, CONFLICT, MANUAL_INTERVENTION]}}
+        - {name: open, in: query, schema: {type: boolean}}
+        - {name: protocol, in: query, schema: {type: string, maxLength: 64}}
+        - {name: source_chain_id, in: query, schema: {type: string, pattern: '^[0-9]+$'}}
+        - {name: destination_chain_id, in: query, schema: {type: string, pattern: '^[0-9]+$'}}
+      responses:
+        '200':
+          description: Bounded cursor page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Anomaly'}}
+                  next_cursor: {type: string, maxLength: 512}
+  /health/live:
+    get:
+      summary: Process liveness
+      responses:
+        '200': {description: Process running}
+  /health/ready:
+    get:
+      summary: Readiness including database and both chain monitors
+      responses:
+        '200': {description: Ready}
+        '503': {description: Unready or manual intervention required}
+  /metrics:
+    get:
+      summary: Prometheus scrape endpoint
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema: {type: string}
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Default 50; maximum 100.
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque base64url encoding of the last returned database identity; results are ordered by increasing durable identity.
+      schema: {type: string, maxLength: 64}
+  responses:
+    NotFound:
+      description: No matching message
+  schemas:
+    State:
+      type: string
+      enum: [NO_CANONICAL_EVIDENCE, UNMATCHED_DESTINATION, SOURCE_SEEN, SOURCE_FINAL, RELAY_PENDING, DEST_SEEN, COMPLETED]
+    Evidence:
+      type: object
+      required: [observation_id, chain_id, block_hash, tx_hash, log_index, canonical, observed_at]
+      properties:
+        observation_id: {type: integer, format: int64, minimum: 1}
+        chain_id: {type: string, pattern: '^[0-9]+$'}
+        block_number: {type: integer, format: int64, minimum: 0}
+        block_hash: {type: string, pattern: '^0x[0-9a-fA-F]{64}$'}
+        tx_hash: {type: string, pattern: '^0x[0-9a-fA-F]{64}$'}
+        log_index: {type: integer, format: int64, minimum: 0}
+        canonical: {type: boolean}
+        observed_at: {type: string, format: date-time}
+    Finality:
+      type: object
+      required: [policy, satisfied]
+      properties:
+        policy: {type: string, enum: [confirmations, safe, finalized]}
+        satisfied: {type: boolean}
+        satisfied_at: {type: string, format: date-time, nullable: true}
+        required_confirmations: {type: integer, format: int64, minimum: 1, nullable: true}
+        observed_confirmations: {type: integer, format: int64, minimum: 0, nullable: true}
+        policy_version: {type: integer, minimum: 1, nullable: true}
+        justifying_head_block: {type: integer, format: int64, minimum: 0, nullable: true}
+        justifying_head_hash: {type: string, pattern: '^0x[0-9a-fA-F]{64}$', nullable: true}
+    Anomaly:
+      type: object
+      required: [event_id, subject, kind, reason, opened_at]
+      properties:
+        event_id: {type: integer, format: int64, minimum: 1}
+        subject: {type: string, enum: [MESSAGE, CHAIN]}
+        message_id: {type: string}
+        protocol: {type: string}
+        source_chain_id: {type: string}
+        destination_chain_id: {type: string}
+        chain_id: {type: string}
+        role: {type: string, enum: [SOURCE, DESTINATION]}
+        kind: {type: string, enum: [STUCK, FAILED, REORGED, DUPLICATE_EXECUTION, CONFLICT, MANUAL_INTERVENTION]}
+        episode: {type: integer, minimum: 1, nullable: true}
+        reason: {type: string, maxLength: 512}
+        opened_at: {type: string, format: date-time}
+        resolved_at: {type: string, format: date-time, nullable: true}
+        resolution_reason: {type: string}
+        sla_anchor: {type: string, format: date-time, nullable: true}
+        sla_threshold_ms: {type: integer, format: int64, nullable: true}
+        relay_policy_version: {type: integer, nullable: true}
+    Message:
+      type: object
+      required: [id, protocol, source_chain_id, destination_chain_id, message_id, state, revision, source_finality, destination_finality, stuck, diagnosis, anomalies]
+      properties:
+        id: {type: string, maxLength: 256}
+        protocol: {type: string, maxLength: 64}
+        source_chain_id: {type: string, pattern: '^[0-9]+$'}
+        destination_chain_id: {type: string, pattern: '^[0-9]+$'}
+        message_id: {type: string, pattern: '^0x[0-9a-fA-F]{64}$'}
+        state: {$ref: '#/components/schemas/State'}
+        revision: {type: integer, format: int64}
+        sender: {type: string, pattern: '^0x[0-9a-fA-F]{40}$', nullable: true}
+        recipient: {type: string, pattern: '^0x[0-9a-fA-F]{40}$', nullable: true}
+        payload_hash: {type: string, pattern: '^0x[0-9a-fA-F]{64}$', nullable: true}
+        source_evidence: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Evidence'}}
+        destination_evidence: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Evidence'}}
+        source_finality: {$ref: '#/components/schemas/Finality'}
+        destination_finality: {$ref: '#/components/schemas/Finality'}
+        relay_eligible_at: {type: string, format: date-time, nullable: true}
+        expected_by: {type: string, format: date-time, nullable: true}
+        relay_sla_ms: {type: integer, format: int64}
+        relay_policy_version: {type: integer}
+        age_seconds: {type: integer, format: int64, minimum: 0}
+        stuck: {type: boolean}
+        diagnosis: {type: string, enum: [MANUAL_INTERVENTION, CONFLICT, DUPLICATE_EXECUTION, CHAIN_UNAVAILABLE, STUCK, ORDINARY]}
+        source_status: {$ref: '#/components/schemas/ChainStatus'}
+        destination_status: {$ref: '#/components/schemas/ChainStatus'}
+        anomalies: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Anomaly'}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ChainStatus:
+      type: object
+      required: [chain_id, role, health, checkpoint_block, observed_head_block, ready, manual_intervention, confirmations]
+      properties:
+        chain_id: {type: string, pattern: '^[0-9]+$'}
+        role: {type: string, enum: [source, destination]}
+        health: {type: string, enum: [HEALTHY, DEGRADED, MANUAL_INTERVENTION]}
+        checkpoint_block: {type: integer, format: int64, minimum: 0}
+        observed_head_block: {type: integer, format: int64, minimum: 0}
+        lag_blocks: {type: integer, format: int64, minimum: 0}
+        manual_intervention: {type: boolean}
+        ready: {type: boolean}
+        confirmations: {type: integer, minimum: 1}
+        last_successful_at: {type: string, format: date-time, nullable: true}
+        endpoints: {type: array, maxItems: 8, items: {$ref: '#/components/schemas/EndpointStatus'}}
+    EndpointStatus:
+      type: object
+      required: [id, chain_id, expected_anchor, eligible, observed_head, last_latency_ms, health, stale]
+      properties:
+        id: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}
+        chain_id: {type: string, pattern: '^[0-9]+$'}
+        expected_anchor: {type: string, pattern: '^0x[0-9a-f]{64}$'}
+        eligible: {type: boolean}
+        observed_head: {type: integer, format: int64, minimum: 0}
+        last_latency_ms: {type: integer, format: int64, minimum: 0}
+        health: {type: string, enum: [UNTESTED, HEALTHY, STALE, DEGRADED, WRONG_CHAIN, WRONG_ANCHOR, DISAGREEMENT]}
+        stale: {type: boolean}
+        cooldown_until: {type: string, format: date-time, nullable: true}
