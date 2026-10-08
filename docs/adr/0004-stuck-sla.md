@@ -1,6 +1,6 @@
 # ADR 0004: Stuck is an operational SLA classification
 
-Status: Implemented in Phase 4.
+Status: Implemented.
 
 The SLA clock starts at durable `relay_eligible_at`, currently equal to the persisted `source_final_at` for the MockBridge reference; this adapter has no extra delay or challenge. The threshold is configured by protocol and chain pair, with positive millisecond duration and policy version. `expected_by` and the policy snapshot persist with the message. At exactly `expected_by` the inclusive predicate may open STUCK. `STUCK` means expected matching destination evidence has not appeared by the deadline; it is not cryptographic failure or proof of failed delivery.
 

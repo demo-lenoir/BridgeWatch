@@ -1,49 +1,75 @@
 # BridgeWatch
 
-Cross-chain delivery monitoring in Go.
+BridgeWatch checks whether a message sent through a bridge was actually executed on the destination chain.
 
-BridgeWatch observes a configured source chain and destination chain independently. It records source messages, waits for source finality, opens a relay expectation, correlates destination execution, and classifies delayed delivery as `STUCK` only while both watchers have healthy current evidence. Bounded reorgs recompute message state, including withdrawal of `COMPLETED`; duplicate or conflicting executions block completion. PostgreSQL checkpoints and retained observations make catch-up and restart repeatable.
+A source transaction can succeed while delivery is delayed, duplicated, or never completed. Both chains can also reorganize, and an RPC provider can miss data or fail midway through a scan. BridgeWatch follows each chain independently, matches source messages to destination executions, and keeps a durable account of what it has seen. This repository demonstrates the monitoring and recovery work behind a useful bridge status, using a deterministic MockBridge rather than a live custody bridge.
 
-Multiple RPC endpoints per chain provide bounded failover. Each endpoint is checked against the configured chain and genesis anchor. Cross-provider header disagreement degrades readiness without a provider vote. A deep divergence beyond the automatic bound requires the explicit `reconcile-chain` procedure.
-
-## Run the local demonstration
-
-```sh
-make demo
-```
-
-The command builds the MockBridge fixtures, starts isolated PostgreSQL 18.6 and two Anvil 1.8.5 chains (`31337` and `31338`), and checks the full scenario. It writes machine-readable results to `out/phase5/demo.json`. `make benchmark` performs three correctness-gated local workload runs and writes raw results and a median summary to `out/phase5/`. These are local fixture results, not service-level promises.
-
-`make verify-phase5` runs the inherited test, race, migration, and two-chain gates, then the demo, benchmark smoke, build and scanner checks. `make clean-clone-verify` repeats core gates from `git archive HEAD` in a temporary directory. Go 1.27.1, Python 3, PostgreSQL 18.6 command-line tools, Ruby, `curl`, Docker, Syft, and Trivy are required for the complete final gate. The verifier uses installed Foundry 1.8.5 or downloads the official archive and checks its published SHA-256.
-
-## Architecture
+## How it works
 
 ```mermaid
 flowchart LR
-  SR[Source RPC pool] --> SW[Source watcher]
-  DR[Destination RPC pool] --> DW[Destination watcher]
-  SW --> PA[MockBridge protocol adapter]
-  DW --> PA
-  PA --> PG[(PostgreSQL blocks, observations, checkpoints)]
-  PG --> PR[Projection and reconciliation]
-  PR --> SLA[SLA classifier]
-  SLA --> OUT[Alert outbox]
-  PR --> API[Read-only API and metrics]
-  OUT --> SINK[Configured alert sink]
+  S[Source RPC pool] --> SW[Source watcher]
+  D[Destination RPC pool] --> DW[Destination watcher]
+  SW --> A[MockBridge adapter]
+  DW --> A
+  A --> P[(PostgreSQL observations and checkpoints)]
+  P --> R[Message projection and reconciliation]
+  R --> C[SLA classifier]
+  C --> O[Alert outbox]
+  R --> API[Read-only API and metrics]
 ```
 
-The [specification](SPEC.md), [architecture](docs/architecture.md), [schema](docs/schema.md), [failure matrix](docs/failure-matrix.md), [threat model](docs/threat-model.md), [test strategy](docs/testing.md), [evidence map](docs/evidence.md), [demo](docs/demo.md), [benchmark](docs/benchmark.md), and [ADRs](docs/adr/) describe the implementation and limits. The [OpenAPI contract](api/openapi.yaml) defines read-only routes.
+The source watcher records a message before the destination watcher can claim its execution. Each watcher advances from a durable checkpoint and applies its own confirmation policy. The projection can withdraw a previous `COMPLETED` result after a bounded reorganization. A message becomes `STUCK` only when its deadline has passed **and** both watchers have current, healthy evidence; an unavailable provider is not evidence of non-delivery.
 
-## Configuration and recovery
+## Engineering focus
 
-The service requires explicit database, chain, contract, genesis, start block, confirmation, reorg depth, SLA, and policy version settings. See [demo configuration](docs/demo.md). `BRIDGEWATCH_SOURCE_RPC_ENDPOINTS` and `BRIDGEWATCH_DESTINATION_RPC_ENDPOINTS` accept comma-separated `id=http-url` entries (maximum eight per chain); the legacy single `BRIDGEWATCH_SOURCE_RPC_URL` and `BRIDGEWATCH_DESTINATION_RPC_URL` remain supported. Endpoint IDs are bounded metric labels; credential-bearing URLs are excluded from diagnostics and telemetry. The API binds to `127.0.0.1:8080` by default, and the container sets `:8080`.
+| Problem | Design and resulting behavior |
+| --- | --- |
+| A destination event can claim an unrelated message ID. | The adapter accepts source identity only from the configured source contract and correlates destination evidence to it; a destination event alone cannot create a valid source message. |
+| Chain history can change after an apparent completion. | Block ancestry and retained observations drive a recomputed projection; bounded reorgs can revoke completion without deleting the earlier observation. |
+| A restart can interrupt either watcher. | PostgreSQL stores observations and checkpoints; catch-up resumes from the committed position instead of relying on process memory. |
+| An RPC endpoint can fail or disagree with another. | Endpoints are checked against chain identity and the configured anchor. Disagreement degrades readiness; it is not resolved by a provider vote. |
+| An overdue message may simply be hidden by unhealthy watchers. | SLA classification requires fresh evidence on both chains before emitting a stuck alert. |
+| A deep fork exceeds retained automatic recovery. | Progress stops for the explicit `reconcile-chain` procedure, which validates the selected ancestor before changing canonical flags. |
 
-After `MANUAL_INTERVENTION`, stop the service and follow the [recovery procedure](docs/recovery.md). The command is a dry run unless `--execute` is supplied. It validates the configured chain and anchor, selected endpoint, exact persisted checkpoint, chosen canonical ancestor, and retained ancestry before changing canonical flags. Restart the service to replay the selected branch. Historical observations, transitions, anomaly episodes, and alerts remain stored.
+The [failure matrix](docs/failure-matrix.md) and [architecture](docs/architecture.md) give the exact state and trust boundaries.
 
-## Trust boundary
+## Quick start
 
-Configured RPC providers are trusted observation sources. Multiple endpoints improve availability and visibility; they do not establish consensus or prove log completeness. MockBridge is a deterministic fixture, not a validator or custody bridge. BridgeWatch does not submit transactions, prove bridge economic security, or guarantee delivery. Alert delivery is at least once. There is no production history or independent audit.
+Prerequisites for the local demonstration: Go 1.27.1, Python 3, PostgreSQL 18 server tools, Docker, and Foundry (`anvil`, `forge`, `cast`). The demo starts disposable local chains and PostgreSQL; no public RPC credentials are needed.
 
-## License
+```sh
+git clone <repository-url> BridgeWatch
+cd BridgeWatch
+go mod download
+make demo
+go test ./...
+```
+
+`make demo` builds the MockBridge fixture, starts two Anvil chains and PostgreSQL, then checks source finality, delivery, delay, reorg, and recovery behavior. It writes local machine-readable results to `out/phase5/demo.json`. See [demo steps](docs/demo.md).
+
+For the complete local gate, install the additional tools listed in [testing](docs/testing.md), including Ruby, `curl`, Syft, and Trivy, then run `make verify-phase5`. This gate covers Go tests and race checks, migrations, two-chain scenarios, the demo, a benchmark smoke run, build, and scanning. `make clean-clone-verify` also replays core checks from a temporary export of the committed tree.
+
+## Local benchmark
+
+`make benchmark` runs three correctness-gated local workloads and writes raw runs and a median summary under `out/phase5/`. The [benchmark method](docs/benchmark.md) explains the fixture and assertions. These results measure a local test environment, not public bridge throughput or a service-level commitment.
+
+## Repository map
+
+```text
+cmd/bridgewatch/   service and operator command
+internal/          chain watchers, protocol adapter, projection, storage, API
+migrations/        PostgreSQL schema
+contracts/         local MockBridge fixtures
+scripts/           demo, verification, and release tooling
+api/               OpenAPI contract
+docs/              architecture, tests, recovery, and design decisions
+```
+
+Start with the [specification](SPEC.md), [schema](docs/schema.md), [testing guide](docs/testing.md), and [evidence map](docs/evidence.md). The [threat model](docs/threat-model.md), [recovery procedure](docs/recovery.md), and [ADRs](docs/adr/) cover operational decisions. The [OpenAPI contract](api/openapi.yaml) defines read-only routes.
+
+## Scope and trust
+
+BridgeWatch monitors configured contracts; it does not submit transactions, secure bridge custody, or guarantee delivery. RPC providers remain trusted observation sources, and multiple endpoints do not establish blockchain consensus or prove log completeness. Alert delivery is at least once. The fixture is local, with no production operating history or independent audit.
 
 Apache-2.0. See [LICENSE](LICENSE).
