@@ -67,7 +67,9 @@ def main():
                 run(['go', 'test', '-count=1', '-p', '1', './...'], env=env)
                 run(['go', 'test', '-race', '-count=1', '-p', '1', './...'], env=env)
                 run(['go', 'test', '-count=1', '-v', '-run', '^TestRealTwoAnvilCompletionAndDestinationFirst$', './internal/destination'], env=env)
-                run(['go', 'test', '-count=1', '-v', '-run', '^Test(ReadOnlyAPIAndShutdown|OperationalSLABoundaryLateDeliveryAndRestart|DestinationOutageSuppressesNewStuck|StuckSourceReorgAndDestinationReorgNewEpisode|StuckSourceReincludedOnNewCanonicalBranchResetsAnchor|TwoStuckWorkersAndCompletionRace|CompletionBeforeSLANoEpisode|AlertResponseLostRetriesSameIdentity|AlertDeliveryOutcomesAndRestart|ConcurrentAlertWorkersClaimOnce|AlertLeaseExpiryAfterWorkerCrash|ManualIncidentAlertIsChainScoped)$', './internal/api', './internal/destination'], env=env)
+                # Both packages reset the same integration database. Run them in sequence;
+                # concurrent TRUNCATE ... CASCADE calls can deadlock on table locks.
+                run(['go', 'test', '-count=1', '-p', '1', '-v', '-run', '^Test(ReadOnlyAPIAndShutdown|OperationalSLABoundaryLateDeliveryAndRestart|DestinationOutageSuppressesNewStuck|StuckSourceReorgAndDestinationReorgNewEpisode|StuckSourceReincludedOnNewCanonicalBranchResetsAnchor|TwoStuckWorkersAndCompletionRace|CompletionBeforeSLANoEpisode|AlertResponseLostRetriesSameIdentity|AlertDeliveryOutcomesAndRestart|ConcurrentAlertWorkersClaimOnce|AlertLeaseExpiryAfterWorkerCrash|ManualIncidentAlertIsChainScoped)$', './internal/api', './internal/destination'], env=env)
                 for number in range(5, 0, -1):
                     files = list((ROOT / 'migrations').glob(f'{number:04d}_*.down.sql'))
                     if len(files) != 1:
